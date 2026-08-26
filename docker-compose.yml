@@ -1,0 +1,178 @@
+name: mercurio
+
+services:
+  # ---------- infraestrutura ----------
+
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: mercurio-kafka
+    environment:
+      # KRaft: sem Zookeeper. Um unico no faz papel de broker e controller.
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Com um unico broker, replicacao 1 e o maximo possivel.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Desligado de proposito: o auto-create usa o default de uma particao, e um
+      # consumidor que suba antes do produtor faria o broker criar o topico
+      # errado — as particoes restantes ficariam sem dono e os eventos que
+      # caissem nelas nunca seriam consumidos. Cada servico declara os topicos.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      CLUSTER_ID: mercurio-cluster-0001
+    ports:
+      - "29092:29092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: mercurio-postgres
+    environment:
+      POSTGRES_USER: mercurio
+      POSTGRES_PASSWORD: mercurio
+      POSTGRES_DB: mercurio_payments
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Cria o segundo banco no primeiro start: cada servico tem o seu, para que
+      # nenhum consiga ler as tabelas do outro por atalho.
+      - ./infra/postgres-init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mercurio"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mongodb:
+    image: mongo:7
+    container_name: mercurio-mongodb
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  redis:
+    image: redis:7-alpine
+    container_name: mercurio-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------- servicos ----------
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: payment-service
+    container_name: mercurio-payment
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/mercurio_payments
+      DB_USERNAME: mercurio
+      DB_PASSWORD: mercurio
+      REDIS_HOST: redis
+      KAFKA_BOOTSTRAP: kafka:9092
+      LOG_LEVEL: INFO
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+
+  antifraud-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: antifraud-service
+    container_name: mercurio-antifraud
+    depends_on:
+      mongodb: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    environment:
+      MONGO_URI: mongodb://mongodb:27017/mercurio_antifraud
+      REDIS_HOST: redis
+      KAFKA_BOOTSTRAP: kafka:9092
+      LOG_LEVEL: INFO
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
+
+  ledger-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: ledger-service
+    container_name: mercurio-ledger
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/mercurio_ledger
+      DB_USERNAME: mercurio
+      DB_PASSWORD: mercurio
+      REDIS_HOST: redis
+      KAFKA_BOOTSTRAP: kafka:9092
+      LOG_LEVEL: INFO
+    ports:
+      - "8083:8083"
+    restart: unless-stopped
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: notification-service
+    container_name: mercurio-notification
+    depends_on:
+      mongodb: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    environment:
+      MONGO_URI: mongodb://mongodb:27017/mercurio_notifications
+      REDIS_HOST: redis
+      KAFKA_BOOTSTRAP: kafka:9092
+      LOG_LEVEL: INFO
+    ports:
+      - "8084:8084"
+    restart: unless-stopped
+
+volumes:
+  kafka-data:
+  postgres-data:
+  mongo-data:
+  redis-data:

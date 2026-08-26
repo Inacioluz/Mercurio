@@ -1,0 +1,19 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+mercurio:
+  outbox:
+    # Relay mais agressivo no teste, para nao esperar a toa.
+    poll-interval: 200
+    # Desliga a limpeza horaria durante os testes.
+    cleanup-cron: "-"
+
+logging:
+  level:
+    com.inacio.mercurio: WARN
+    org.testcontainers: WARN
+    org.apache.kafka: ERROR

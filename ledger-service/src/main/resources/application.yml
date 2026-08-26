@@ -1,0 +1,89 @@
+spring:
+  application:
+    name: ledger-service
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/mercurio_ledger}
+    username: ${DB_USERNAME:mercurio}
+    password: ${DB_PASSWORD:mercurio}
+    hikari:
+      pool-name: ledger-pool
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+
+  cache:
+    type: redis
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 5
+      properties:
+        enable.idempotence: true
+        # O consumidor deriva o tipo do parametro do listener; mandar o cabecalho
+        # de tipo acoplaria os servicos aos nomes de classe do produtor.
+        spring.json.add.type.headers: false
+    consumer:
+      group-id: ledger-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      properties:
+        # Default e 5 min. Com 30s, um topico que ganhe particoes e percebido
+        # rapido e o grupo rebalanceia, em vez de deixa-las sem consumidor.
+        metadata.max.age.ms: 30000
+    listener:
+      ack-mode: record
+
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: ${SERVER_PORT:8083}
+  error:
+    include-stacktrace: never
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    doc-expansion: none
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+
+logging:
+  level:
+    root: INFO
+    com.inacio.mercurio: ${LOG_LEVEL:INFO}
+    org.apache.kafka: WARN

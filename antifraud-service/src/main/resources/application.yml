@@ -1,0 +1,75 @@
+spring:
+  application:
+    name: antifraud-service
+
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/mercurio_antifraud}
+      # Cria os indices declarados nas entidades no start, entre eles o unico
+      # de paymentId que garante a idempotencia da analise.
+      auto-index-creation: true
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 5
+      properties:
+        enable.idempotence: true
+        spring.json.add.type.headers: false
+    consumer:
+      group-id: antifraud-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      properties:
+        # Default e 5 min. Com 30s, um topico que ganhe particoes e percebido
+        # rapido e o grupo rebalanceia, em vez de deixa-las sem consumidor.
+        metadata.max.age.ms: 30000
+    listener:
+      ack-mode: record
+
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: ${SERVER_PORT:8082}
+  error:
+    include-stacktrace: never
+
+mercurio:
+  antifraud:
+    # Contas em lista de bloqueio: qualquer pagamento que as envolva e barrado.
+    blocked-accounts: ${BLOCKED_ACCOUNTS:ACC-6666}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    doc-expansion: none
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+
+logging:
+  level:
+    root: INFO
+    com.inacio.mercurio: ${LOG_LEVEL:INFO}
+    org.apache.kafka: WARN
+    org.mongodb.driver: WARN
