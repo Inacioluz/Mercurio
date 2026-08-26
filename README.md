@@ -5,9 +5,6 @@ transação financeira por mensageria — sem transação distribuída, sem comm
 
 **Stack:** Java 21 · Spring Boot 3.4 · Apache Kafka · PostgreSQL · MongoDB · Redis · Docker
 
-> O nome vem do deus romano: mensageiro dos deuses e patrono do comércio — os dois lados do que o
-> sistema faz.
-
 ---
 
 ## O problema
